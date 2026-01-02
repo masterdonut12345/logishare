@@ -101,7 +101,7 @@ struct ProjectDetailView: View {
                         )
                     }
                 } label: {
-                    Label("Merge selected version into my working copy", systemImage: "square.and.arrow.down.on.square")
+                    Label("Open working version", systemImage: "music.note")
                 }
                 .disabled(selectedVersion == nil)
 
@@ -122,13 +122,9 @@ struct ProjectDetailView: View {
                         )
                     }
                 } label: {
-                    Label("Add selected version into my working copy", systemImage: "square.and.arrow.down.on.square")
+                    Label("Merge selected version into my working copy", systemImage: "arrow.triangle.merge")
                 }
                 .disabled(selectedVersion == nil)
-
-                Text("Merges the selected version below with your current working copy.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 10) {
