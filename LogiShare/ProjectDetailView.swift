@@ -26,6 +26,7 @@ struct ProjectDetailView: View {
     // Merge form
     @State private var mergeName: String = ""
     @State private var mergeOtherProjectId: UUID?
+    @State private var mergeOtherVersionId: UUID?
     @State private var mergePolicy: LocalStore.MergeConflictPolicy = .keepA_renameB
 
     private var isOwner: Bool {
@@ -62,6 +63,13 @@ struct ProjectDetailView: View {
             if selectedVersionId == nil { selectedVersionId = versions.first?.id }
             if mergeName.isEmpty { mergeName = "\(project.name) (Merged)" }
             if forkName.isEmpty { forkName = "\(project.name) (Fork)" }
+            if mergeOtherProjectId == nil { mergeOtherProjectId = project.id }
+            if mergeOtherVersionId == nil {
+                mergeOtherVersionId = defaultMergeVersionId(
+                    in: project,
+                    excluding: selectedVersion
+                )
+            }
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -369,7 +377,12 @@ struct ProjectDetailView: View {
     // MARK: - Merge Sheet
 
     private func mergeSheet(selectedVersion: ProjectVersion?) -> some View {
-        let otherProjects = store.projects.filter { $0.id != project.id }
+        let targetProject = store.projects.first(where: { $0.id == (mergeOtherProjectId ?? project.id) }) ?? project
+        let mergeableVersions = mergeCandidates(
+            in: targetProject,
+            excluding: targetProject.id == project.id ? selectedVersion : nil
+        )
+        let selectedOtherVersion = mergeableVersions.first(where: { $0.id == mergeOtherVersionId }) ?? mergeableVersions.first
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -377,6 +390,9 @@ struct ProjectDetailView: View {
                 Spacer()
                 Button("Done") { showingMergeSheet = false }
             }
+
+            Text("Combine two versions without overwriting work — great when one person adds piano and another adds guitar.")
+                .foregroundStyle(.secondary)
 
             Text("This is a file-level merge of the .logicx packages (not a Logic-aware track merge).")
                 .foregroundStyle(.secondary)
@@ -388,12 +404,33 @@ struct ProjectDetailView: View {
                 .frame(maxWidth: 420)
 
             Picker("Merge with", selection: $mergeOtherProjectId) {
-                Text("Select a project").tag(UUID?.none)
-                ForEach(otherProjects, id: \.id) { p in
+                Text("This project (choose another version)").tag(UUID?.some(project.id))
+                ForEach(store.projects.filter({ $0.id != project.id }), id: \.id) { p in
                     Text(p.name).tag(UUID?.some(p.id))
                 }
             }
             .frame(maxWidth: 420)
+            .onChange(of: mergeOtherProjectId) { newValue in
+                if let projectId = newValue, let newProject = store.projects.first(where: { $0.id == projectId }) {
+                    mergeOtherVersionId = defaultMergeVersionId(
+                        in: newProject,
+                        excluding: (newProject.id == project.id) ? selectedVersion : nil
+                    )
+                }
+            }
+
+            if mergeableVersions.isEmpty {
+                Text("No other versions available to merge.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker("Use version", selection: $mergeOtherVersionId) {
+                    ForEach(mergeableVersions, id: \.id) { version in
+                        Text(versionLabel(version))
+                            .tag(UUID?.some(version.id))
+                    }
+                }
+                .frame(maxWidth: 420)
+            }
 
             Picker("Conflict policy", selection: $mergePolicy) {
                 Text("Keep A, rename B").tag(LocalStore.MergeConflictPolicy.keepA_renameB)
@@ -406,7 +443,7 @@ struct ProjectDetailView: View {
                     let vA = selectedVersion,
                     let otherId = mergeOtherProjectId,
                     let otherProject = store.projects.first(where: { $0.id == otherId }),
-                    let vB = otherProject.versions.first
+                    let vB = otherProject.versions.first(where: { $0.id == (mergeOtherVersionId ?? $0.id) })
                 else { return }
 
                 Task {
@@ -426,9 +463,9 @@ struct ProjectDetailView: View {
                 Label("Create Merged Project", systemImage: "arrow.triangle.merge")
             }
             .buttonStyle(.borderedProminent)
-            .disabled(selectedVersion == nil || mergeOtherProjectId == nil)
+            .disabled(selectedVersion == nil || mergeOtherProjectId == nil || selectedOtherVersion == nil)
 
-            Text("Note: uses the selected version of this project + the latest version of the other project.")
+            Text("Note: merges the selected version of this project with the chosen version from the other project.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -437,10 +474,25 @@ struct ProjectDetailView: View {
         .padding(16)
         .frame(width: 560, height: 360)
     }
+
+    private func mergeCandidates(in project: Project, excluding version: ProjectVersion?) -> [ProjectVersion] {
+        project.versions.filter { v in
+            guard let excluded = version else { return true }
+            return v.id != excluded.id
+        }
+    }
+
+    private func defaultMergeVersionId(in project: Project, excluding version: ProjectVersion?) -> UUID? {
+        mergeCandidates(in: project, excluding: version).first?.id
+    }
+
+    private func versionLabel(_ version: ProjectVersion) -> String {
+        let dateString = version.createdAt.formatted(date: .abbreviated, time: .shortened)
+        return "\(version.message) — \(dateString)"
+    }
 }
 
 final class LocalUser {
     static let shared = LocalUser()
     var username: String = NSFullUserName().isEmpty ? "You" : NSFullUserName()
 }
-
