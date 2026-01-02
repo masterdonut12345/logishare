@@ -91,21 +91,23 @@ struct ProjectDetailView: View {
 
             HStack(spacing: 10) {
                 Button {
-                    store.openWorkingCopyInLogic(project: project)
-                } label: {
-                    Label("Open Working Copy in Logic", systemImage: "music.note")
-                }
-
-                Button {
-                    if let v = selectedVersion {
-                        store.openVersionCheckoutInLogic(project: project, version: v)
+                    guard let v = selectedVersion else { return }
+                    Task {
+                        await store.addVersionIntoWorkingCopy(
+                            projectId: project.id,
+                            fromVersion: v,
+                            currentUserId: auth.me?.id,
+                            currentUserName: meName
+                        )
                     }
                 } label: {
-                    Label("Open Selected Version (Checkout)", systemImage: "clock.arrow.circlepath")
+                    Label("Merge selected version into my working copy", systemImage: "square.and.arrow.down.on.square")
                 }
                 .disabled(selectedVersion == nil)
 
-                Spacer()
+                Text("Merges the selected version below with your current working copy.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 10) {
