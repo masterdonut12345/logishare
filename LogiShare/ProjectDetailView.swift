@@ -13,20 +13,10 @@ struct ProjectDetailView: View {
 
     // Sheets
     @State private var showingShareSheet = false
-    @State private var showingForkSheet = false
-    @State private var showingMergeSheet = false
 
     // Share form
     @State private var newMemberId: String = ""
     @State private var newMemberRole: ProjectRole = .editor
-
-    // Fork form
-    @State private var forkName: String = ""
-
-    // Merge form
-    @State private var mergeName: String = ""
-    @State private var mergeOtherProjectId: UUID?
-    @State private var mergePolicy: LocalStore.MergeConflictPolicy = .keepA_renameB
 
     private var isOwner: Bool {
         guard let ownerId = project.ownerUserId, let meId = auth.me?.id else { return true }
@@ -60,37 +50,15 @@ struct ProjectDetailView: View {
         .padding()
         .onAppear {
             if selectedVersionId == nil { selectedVersionId = versions.first?.id }
-            if mergeName.isEmpty { mergeName = "\(project.name) (Merged)" }
-            if forkName.isEmpty { forkName = "\(project.name) (Fork)" }
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Menu {
-                    Button("Share…") { showingShareSheet = true }
-                        .disabled(!isOwner)
-
-                    Divider()
-
-                    Button("Fork selected version…") { showingForkSheet = true }
-                        .disabled(selectedVersion == nil)
-
-                    Divider()
-
-                    Button("Merge with another project…") { showingMergeSheet = true }
-                        .disabled(store.projects.count < 2 || selectedVersion == nil)
-                } label: {
-                    Label("Actions", systemImage: "ellipsis.circle")
-                }
+                Button("Share…") { showingShareSheet = true }
+                    .disabled(!isOwner)
             }
         }
         .sheet(isPresented: $showingShareSheet) {
             shareSheet
-        }
-        .sheet(isPresented: $showingForkSheet) {
-            forkSheet(selectedVersion: selectedVersion)
-        }
-        .sheet(isPresented: $showingMergeSheet) {
-            mergeSheet(selectedVersion: selectedVersion)
         }
     }
 
@@ -125,19 +93,23 @@ struct ProjectDetailView: View {
                 Button {
                     store.openWorkingCopyInLogic(project: project)
                 } label: {
-                    Label("Open Working Copy in Logic", systemImage: "music.note")
+                    Label("Open working version", systemImage: "music.note")
                 }
 
                 Button {
-                    if let v = selectedVersion {
-                        store.openVersionCheckoutInLogic(project: project, version: v)
+                    guard let v = selectedVersion else { return }
+                    Task {
+                        await store.addVersionIntoWorkingCopy(
+                            projectId: project.id,
+                            fromVersion: v,
+                            currentUserId: auth.me?.id,
+                            currentUserName: meName
+                        )
                     }
                 } label: {
-                    Label("Open Selected Version (Checkout)", systemImage: "clock.arrow.circlepath")
+                    Label("Merge selected version into my working copy", systemImage: "arrow.triangle.merge")
                 }
                 .disabled(selectedVersion == nil)
-
-                Spacer()
             }
 
             HStack(spacing: 10) {
@@ -170,10 +142,16 @@ struct ProjectDetailView: View {
             Text("Versions").font(.headline)
 
             List(versions, selection: $selectedVersionId) { v in
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text(v.message).font(.subheadline).bold()
                         Spacer()
+                        Button {
+                            store.openVersionCheckoutInLogic(project: project, version: v)
+                        } label: {
+                            Label("View this version", systemImage: "arrow.up.right.square")
+                        }
+                        .buttonStyle(.link)
                     }
 
                     HStack(spacing: 8) {
@@ -323,124 +301,9 @@ struct ProjectDetailView: View {
         .frame(width: 560, height: 420)
     }
 
-    // MARK: - Fork Sheet
-
-    private func forkSheet(selectedVersion: ProjectVersion?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Fork Project").font(.title3).bold()
-                Spacer()
-                Button("Done") { showingForkSheet = false }
-            }
-
-            Text("This creates a new project you own, with its own working copy.")
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            TextField("New project name", text: $forkName)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 420)
-
-            Button {
-                guard let v = selectedVersion else { return }
-                Task {
-                    await store.forkProject(
-                        sourceProject: project,
-                        fromVersion: v,
-                        newName: forkName,
-                        currentUserId: auth.me?.id,
-                        currentUserName: meName
-                    )
-                    showingForkSheet = false
-                }
-            } label: {
-                Label("Create Fork", systemImage: "point.filled.topleft.down.curvedto.point.bottomright.up")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(selectedVersion == nil)
-
-            Spacer()
-        }
-        .padding(16)
-        .frame(width: 520, height: 240)
-    }
-
-    // MARK: - Merge Sheet
-
-    private func mergeSheet(selectedVersion: ProjectVersion?) -> some View {
-        let otherProjects = store.projects.filter { $0.id != project.id }
-
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Merge Projects").font(.title3).bold()
-                Spacer()
-                Button("Done") { showingMergeSheet = false }
-            }
-
-            Text("This is a file-level merge of the .logicx packages (not a Logic-aware track merge).")
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            TextField("New merged project name", text: $mergeName)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 420)
-
-            Picker("Merge with", selection: $mergeOtherProjectId) {
-                Text("Select a project").tag(UUID?.none)
-                ForEach(otherProjects, id: \.id) { p in
-                    Text(p.name).tag(UUID?.some(p.id))
-                }
-            }
-            .frame(maxWidth: 420)
-
-            Picker("Conflict policy", selection: $mergePolicy) {
-                Text("Keep A, rename B").tag(LocalStore.MergeConflictPolicy.keepA_renameB)
-                Text("Keep B, rename A").tag(LocalStore.MergeConflictPolicy.keepB_renameA)
-            }
-            .frame(maxWidth: 420)
-
-            Button {
-                guard
-                    let vA = selectedVersion,
-                    let otherId = mergeOtherProjectId,
-                    let otherProject = store.projects.first(where: { $0.id == otherId }),
-                    let vB = otherProject.versions.first
-                else { return }
-
-                Task {
-                    await store.mergeProjects(
-                        projectA: project,
-                        versionA: vA,
-                        projectB: otherProject,
-                        versionB: vB,
-                        mergedName: mergeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "\(project.name) (Merged)" : mergeName,
-                        policy: mergePolicy,
-                        currentUserId: auth.me?.id,
-                        currentUserName: meName
-                    )
-                    showingMergeSheet = false
-                }
-            } label: {
-                Label("Create Merged Project", systemImage: "arrow.triangle.merge")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(selectedVersion == nil || mergeOtherProjectId == nil)
-
-            Text("Note: uses the selected version of this project + the latest version of the other project.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Spacer()
-        }
-        .padding(16)
-        .frame(width: 560, height: 360)
-    }
 }
 
 final class LocalUser {
     static let shared = LocalUser()
     var username: String = NSFullUserName().isEmpty ? "You" : NSFullUserName()
 }
-
