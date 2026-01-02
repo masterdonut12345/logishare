@@ -124,7 +124,7 @@ struct ProjectDetailView: View {
                 }
                 .disabled(selectedVersion == nil)
 
-                Text("Keeps your files; any conflicts are copied with “__fromVersion” names so nothing is lost.")
+                Text("Merges the selected version below with your current working copy.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -159,10 +159,16 @@ struct ProjectDetailView: View {
             Text("Versions").font(.headline)
 
             List(versions, selection: $selectedVersionId) { v in
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text(v.message).font(.subheadline).bold()
                         Spacer()
+                        Button {
+                            store.openVersionCheckoutInLogic(project: project, version: v)
+                        } label: {
+                            Label("View this version", systemImage: "arrow.up.right.square")
+                        }
+                        .buttonStyle(.link)
                     }
 
                     HStack(spacing: 8) {
