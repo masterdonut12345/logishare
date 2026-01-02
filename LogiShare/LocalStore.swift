@@ -282,6 +282,93 @@ final class LocalStore: ObservableObject {
         case keepB_renameA
     }
 
+    /// Combine another saved version into the working copy so collaborators can add each other's changes.
+    func addVersionIntoWorkingCopy(projectId: UUID,
+                                   fromVersion: ProjectVersion,
+                                   currentUserId: String?,
+                                   currentUserName: String?) async {
+        guard let idx = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        var project = projects[idx]
+        let actor = (currentUserName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? currentUserName!
+            : LocalUser.shared.username
+        _ = currentUserId
+
+        do {
+            statusMessage = "Adding version to working copy…"
+
+            let wcURL = URL(fileURLWithPath: project.workingCopyPath)
+            let fromURL = URL(fileURLWithPath: fromVersion.snapshotPath)
+
+            // Keep existing working copy files; rename incoming conflicts.
+            try mergeDirectoryContents(
+                base: wcURL,
+                overlay: fromURL,
+                policy: .keepA_renameB,
+                incomingSuffix: "__fromVersion"
+            )
+
+            // Refresh manifest to validate package after the merge; history stays immutable.
+            _ = try await ProjectScanner.scanLogicPackage(packageURL: wcURL)
+            project.updatedAt = Date()
+
+            projects[idx] = project
+            activity.insert(
+                ActivityEvent(
+                    title: "Added version to working copy",
+                    detail: "\(project.name) ← \(fromVersion.message) (by \(actor))",
+                    projectId: project.id
+                ),
+                at: 0
+            )
+
+            statusMessage = "Version added to working copy"
+            save()
+        } catch {
+            statusMessage = "Add failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Revert the working copy to a specific saved version.
+    func revertWorkingCopy(to version: ProjectVersion,
+                           projectId: UUID,
+                           currentUserId: String?,
+                           currentUserName: String?) async {
+        guard let idx = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        var project = projects[idx]
+        let actor = (currentUserName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? currentUserName!
+            : LocalUser.shared.username
+        _ = currentUserId
+
+        do {
+            statusMessage = "Reverting working copy…"
+
+            let wcURL = URL(fileURLWithPath: project.workingCopyPath)
+            let snapURL = URL(fileURLWithPath: version.snapshotPath)
+            try replaceDirectory(at: wcURL, from: snapURL)
+
+            // Validate package after revert
+            _ = try await ProjectScanner.scanLogicPackage(packageURL: wcURL)
+            project.updatedAt = Date()
+
+            projects[idx] = project
+            activity.insert(
+                ActivityEvent(
+                    title: "Reverted working copy",
+                    detail: "\(project.name) → \(version.message) (by \(actor))",
+                    projectId: project.id
+                ),
+                at: 0
+            )
+
+            statusMessage = "Working copy reverted"
+            save()
+        } catch {
+            statusMessage = "Revert failed: \(error.localizedDescription)"
+        }
+    }
+
     func mergeProjects(projectA: Project,
                        versionA: ProjectVersion,
                        projectB: Project,
@@ -352,7 +439,11 @@ final class LocalStore: ObservableObject {
     }
 
     /// File-level merge: copies overlay contents into base. On conflicts, renames one side.
-    private func mergeDirectoryContents(base: URL, overlay: URL, policy: MergeConflictPolicy) throws {
+    private func mergeDirectoryContents(base: URL,
+                                        overlay: URL,
+                                        policy: MergeConflictPolicy,
+                                        incomingSuffix: String = "__fromB",
+                                        existingSuffix: String = "__fromA") throws {
         let fm = FileManager.default
         let enumerator = fm.enumerator(at: overlay, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles], errorHandler: { _, _ in true })
         while let item = enumerator?.nextObject() as? URL {
@@ -372,12 +463,12 @@ final class LocalStore: ObservableObject {
                 switch policy {
                 case .keepA_renameB:
                     let renamed = dest.deletingLastPathComponent()
-                        .appendingPathComponent(dest.deletingPathExtension().lastPathComponent + "__fromB." + dest.pathExtension)
+                        .appendingPathComponent(dest.deletingPathExtension().lastPathComponent + incomingSuffix + "." + dest.pathExtension)
                     try fm.copyItem(at: item, to: renamed)
                 case .keepB_renameA:
                     // rename existing A file, then copy B into original dest
                     let renamedA = dest.deletingLastPathComponent()
-                        .appendingPathComponent(dest.deletingPathExtension().lastPathComponent + "__fromA." + dest.pathExtension)
+                        .appendingPathComponent(dest.deletingPathExtension().lastPathComponent + existingSuffix + "." + dest.pathExtension)
                     if fm.fileExists(atPath: renamedA.path) { try? fm.removeItem(at: renamedA) }
                     try fm.moveItem(at: dest, to: renamedA)
                     try fm.copyItem(at: item, to: dest)
@@ -518,4 +609,3 @@ extension JSONDecoder {
         return d
     }
 }
-
