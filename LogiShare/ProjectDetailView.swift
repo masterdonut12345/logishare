@@ -91,11 +91,26 @@ struct ProjectDetailView: View {
 
             HStack(spacing: 10) {
                 Button {
-                    store.openWorkingCopyInLogic(project: project)
+                    guard let v = selectedVersion else { return }
+                    Task {
+                        await store.addVersionIntoWorkingCopy(
+                            projectId: project.id,
+                            fromVersion: v,
+                            currentUserId: auth.me?.id,
+                            currentUserName: meName
+                        )
+                    }
                 } label: {
                     Label("Open working version", systemImage: "music.note")
                 }
+                .disabled(selectedVersion == nil)
 
+                Text("Merges the selected version below with your current working copy.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
                 Button {
                     guard let v = selectedVersion else { return }
                     Task {
