@@ -329,6 +329,46 @@ final class LocalStore: ObservableObject {
         }
     }
 
+    /// Revert the working copy to a specific saved version.
+    func revertWorkingCopy(to version: ProjectVersion,
+                           projectId: UUID,
+                           currentUserId: String?,
+                           currentUserName: String?) async {
+        guard let idx = projects.firstIndex(where: { $0.id == projectId }) else { return }
+        var project = projects[idx]
+        let actor = (currentUserName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? currentUserName!
+            : LocalUser.shared.username
+        _ = currentUserId
+
+        do {
+            statusMessage = "Reverting working copy…"
+
+            let wcURL = URL(fileURLWithPath: project.workingCopyPath)
+            let snapURL = URL(fileURLWithPath: version.snapshotPath)
+            try replaceDirectory(at: wcURL, from: snapURL)
+
+            // Validate package after revert
+            _ = try await ProjectScanner.scanLogicPackage(packageURL: wcURL)
+            project.updatedAt = Date()
+
+            projects[idx] = project
+            activity.insert(
+                ActivityEvent(
+                    title: "Reverted working copy",
+                    detail: "\(project.name) → \(version.message) (by \(actor))",
+                    projectId: project.id
+                ),
+                at: 0
+            )
+
+            statusMessage = "Working copy reverted"
+            save()
+        } catch {
+            statusMessage = "Revert failed: \(error.localizedDescription)"
+        }
+    }
+
     func mergeProjects(projectA: Project,
                        versionA: ProjectVersion,
                        projectB: Project,

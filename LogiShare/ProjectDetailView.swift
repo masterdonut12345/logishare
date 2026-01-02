@@ -122,10 +122,14 @@ struct ProjectDetailView: View {
                         )
                     }
                 } label: {
-                    Label("Merge selected version into my working copy", systemImage: "arrow.triangle.merge")
+                    Label("Merge", systemImage: "arrow.triangle.merge")
                 }
                 .disabled(selectedVersion == nil)
             }
+
+            Text("Merges the selected version with your current working copy.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 10) {
                 TextField("Version note (e.g., “vocal comp cleanup”)", text: $versionMessage)
@@ -165,6 +169,20 @@ struct ProjectDetailView: View {
                             store.openVersionCheckoutInLogic(project: project, version: v)
                         } label: {
                             Label("View this version", systemImage: "arrow.up.right.square")
+                        }
+                        .buttonStyle(.link)
+
+                        Button {
+                            Task {
+                                await store.revertWorkingCopy(
+                                    to: v,
+                                    projectId: project.id,
+                                    currentUserId: auth.me?.id,
+                                    currentUserName: meName
+                                )
+                            }
+                        } label: {
+                            Label("Revert", systemImage: "arrow.uturn.backward")
                         }
                         .buttonStyle(.link)
                     }
